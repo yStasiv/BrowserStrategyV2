@@ -41,7 +41,7 @@
     <div class="muted">Покажу останні <select id="limit-select"><option>10</option><option>25</option><option>50</option></select> боїв</div>
     <div style="margin-top:8px;">
       <table id="history-table">
-        <thead><tr><th>id</th><th>час</th><th>winner</th><th>раунд</th><th>деталі</th></tr></thead>
+      <thead><tr><th>id</th><th>час</th><th>winner</th><th>раунд</th><th>деталі</th><th>реплей</th></tr></thead>
         <tbody><tr><td colspan="5" class="muted">Завантаження...</td></tr></tbody>
       </table>
     </div>
@@ -91,7 +91,8 @@ async function fetchHistory(limit=10) {
     for (const r of rows) {
       const details = JSON.stringify(r.details || {}).slice(0,120);
       const tr = document.createElement('tr');
-      tr.innerHTML = `<td>${r.id}</td><td>${formatDate(r.played_at)}</td><td>${r.winner}</td><td>${r.round}</td><td><code>${details}</code></td>`;
+      const replayLink = `<a class="button" href="/replay.html?id=${r.id}">Переглянути</a>`;
+      tr.innerHTML = `<td>${r.id}</td><td>${formatDate(r.played_at)}</td><td>${r.winner}</td><td>${r.round}</td><td><code>${details}</code></td><td>${replayLink}</td>`;
       tbody.appendChild(tr);
     }
   } catch (e) {

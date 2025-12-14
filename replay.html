@@ -13,6 +13,7 @@
 <body>
   <h2>Перегляд бою</h2>
   <canvas id="replay-canvas" width="800" height="480"></canvas>
+  <div id="debug" style="display:none;color:#e6eef8;margin-top:12px;max-width:980px;white-space:pre-wrap;font-family:monospace"></div>
   <div id="controls">
     <button id="btn-play">Play</button>
     <button id="btn-pause">Pause</button>
@@ -42,14 +43,58 @@
     }
 
     let match;
-    try { match = await fetchMatch(); } catch (e) { document.body.insertAdjacentHTML('beforeend','<p style="color:#f88">Помилка завантаження матчу.</p>'); console.error(e); return; }
+    try {
+      match = await fetchMatch();
+    } catch (e) {
+      console.error('Помилка завантаження матчу', e);
+      alert('Помилка завантаження матчу. Дивись консоль для деталей.');
+      return;
+    }
 
-    const details = match.details || {};
-    const units = (details.units || []).map(u=>Object.assign({},u));
-    const moves = details.moves || [];
+    const debugEl = document.getElementById('debug');
+    let details = match.details || {};
+    // some older records have details stored as a JSON string; parse it if so
+    if (typeof details === 'string') {
+      try {
+        details = JSON.parse(details);
+      } catch (e) {
+        // leave as string if parse fails
+        console.warn('Could not parse details JSON string', e);
+      }
+    }
+
+    const rawMoves = (details && details.moves) || [];
+    // If a 'start' snapshot exists in moves, use it as initial units; otherwise fall back to details.units
+    const startEvent = rawMoves.find(m => m && m.type === 'start' && Array.isArray(m.units));
+    const units = (startEvent ? startEvent.units : (details && details.units ? details.units : [])).map(u => Object.assign({}, u));
+    // playback moves: skip the 'start' snapshot so we don't re-apply it
+    const moves = rawMoves.filter(m => !(m && m.type === 'start'));
+
+    // no on-page debug output (hidden). Use console.log for development if needed.
+    console.log('Replay loaded', { id: match.id, units: units.length, moves: moves.length });
 
     // find unit by id in current units
     function findUnit(id){ return units.find(u=>u.id===id); }
+
+    // If units lack coordinates (older records), assign sensible defaults
+    (function ensurePositions(){
+      const players = units.filter(u => u.isPlayer);
+      const enemies = units.filter(u => !u.isPlayer);
+      // assign positions only when x/y are missing
+      let needAssign = units.some(u => typeof u.x !== 'number' || typeof u.y !== 'number');
+      if (!needAssign) return;
+      // place players on left columns and enemies on right columns
+      players.forEach((u, i) => {
+        u.x = u.x ?? 1;
+        u.y = u.y ?? Math.min(5, i);
+        u.visualX = u.x; u.visualY = u.y;
+      });
+      enemies.forEach((u, i) => {
+        u.x = u.x ?? 8;
+        u.y = u.y ?? Math.min(5, i);
+        u.visualX = u.x; u.visualY = u.y;
+      });
+    })();
 
     function draw() {
       ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -102,13 +147,101 @@
       draw();
     }
 
+    // --- moves list UI and helpers ---
+    const movesListEl = (function(){
+      let el = document.getElementById('moves-list');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'moves-list';
+        el.style.color = '#e6eef8';
+        el.style.marginTop = '12px';
+        el.style.maxWidth = '980px';
+        debugEl.insertAdjacentElement('afterend', el);
+      }
+      return el;
+    })();
+
+    function formatMove(m, i) {
+      if (!m) return `${i}: <unknown>`;
+      if (m.type === 'move') return `${i}: move ${m.unitId} (${(m.from&&m.from.x)||''},${(m.from&&m.from.y)||''}) → (${(m.to&&m.to.x)||''},${(m.to&&m.to.y)||''})`;
+      if (m.type === 'attack') return `${i}: attack ${m.attackerId||m.attacker||''} → ${m.targetId} dmg ${m.damage||''} (hp:${m.targetHp||''})`;
+      if (m.type === 'kill') return `${i}: kill ${m.killerId||''} → ${m.victimId}`;
+      if (m.type === 'start') return `${i}: start snapshot`;
+      return `${i}: ${m.type}`;
+    }
+
+    function renderMovesList() {
+      if (!moves || !moves.length) {
+        movesListEl.textContent = 'Історія ходів: відсутня.';
+        return;
+      }
+      movesListEl.innerHTML = '';
+      const wrapper = document.createElement('div');
+      wrapper.style.display = 'flex';
+      wrapper.style.flexDirection = 'column';
+      wrapper.style.gap = '6px';
+      moves.forEach((m, i) => {
+        const item = document.createElement('div');
+        item.textContent = formatMove(m, i);
+        item.style.cursor = 'pointer';
+        item.style.padding = '6px 8px';
+        item.style.borderRadius = '6px';
+        item.style.background = 'rgba(255,255,255,0.02)';
+        item.dataset.index = i;
+        item.addEventListener('click', () => jumpTo(i));
+        wrapper.appendChild(item);
+      });
+      movesListEl.appendChild(wrapper);
+      highlightMove();
+    }
+
+    function highlightMove() {
+      const items = movesListEl.querySelectorAll('div > div');
+      items.forEach((el, i) => {
+        if (i === Math.max(0, idx - 1)) {
+          el.style.background = 'rgba(37,99,235,0.35)';
+          el.style.color = '#fff';
+        } else {
+          el.style.background = 'rgba(255,255,255,0.02)';
+          el.style.color = '#e6eef8';
+        }
+      });
+    }
+
+    function resetToStart() {
+      const startEvent = (rawMoves || []).find(m => m && m.type === 'start' && Array.isArray(m.units));
+      const base = startEvent ? startEvent.units : (details && details.units ? details.units : []);
+      // deep copy
+      units.length = 0;
+      for (const u of base) units.push(Object.assign({}, u));
+      // ensure positions exist
+      units.forEach(u => { u.visualX = (typeof u.x === 'number') ? u.x : (u.visualX ?? 0); u.visualY = (typeof u.y === 'number') ? u.y : (u.visualY ?? 0); });
+      draw();
+    }
+
+    function jumpTo(moveIndex) {
+      stop();
+      resetToStart();
+      idx = 0;
+      for (let i = 0; i <= moveIndex && i < moves.length; i++) {
+        applyMove(moves[i]);
+        idx = i + 1;
+      }
+      highlightMove();
+    }
+
+    // initial render of moves list
+    renderMovesList();
+
     function step() {
-      if (idx >= moves.length) { stop(); return; }
+      if (!moves || idx >= moves.length) { stop(); return; }
       const m = moves[idx++];
       applyMove(m);
+      highlightMove();
     }
 
     function start() {
+      if (!moves || !moves.length) return;
       if (playing) return; playing = true;
       timer = setInterval(()=>{ step(); }, 600);
     }

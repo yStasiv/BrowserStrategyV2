@@ -272,7 +272,8 @@
         const payload = {
           winner,
           round: roundNumber,
-          units: units.map(u => ({ id: u.id, name: u.name, isPlayer: u.isPlayer, hp: u.hp, maxHp: u.maxHp, attack: u.attack }))
+          units: units.map(u => ({ id: u.id, name: u.name, isPlayer: u.isPlayer, hp: u.hp, maxHp: u.maxHp, attack: u.attack })),
+          moves: recordedMoves
         };
         if (typeof sendMatchResult === 'function') {
           sendMatchResult(payload);
