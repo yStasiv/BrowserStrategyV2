@@ -53,16 +53,54 @@
   
   function enterPlacementMode() {
     units = createInitialUnits();
-    let pIndex = 0, eIndex = 0;
-    units.forEach(u => {
+    // helper to get unit size (w,h) - default 1x1
+    function getUnitSize(u) {
+      const s = u.size || 1;
+      return { w: u.w || u.width || s, h: u.h || u.height || s };
+    }
+
+    // find next free position for this unit within allowed columns (players: first 2 columns)
+    function findNextFreePosForUnit(u) {
+      const { w, h } = getUnitSize(u);
+      const maxPlayerCols = 2; // only first 2 columns allowed for player placement
       if (u.isPlayer) {
-        if (typeof u.x !== 'number' || typeof u.y !== 'number') {
-          u.x = 0; u.y = Math.min(GRID_ROWS - 1, pIndex++);
+        for (let y = 0; y <= GRID_ROWS - h; y++) {
+          for (let x = 0; x <= Math.max(0, maxPlayerCols - w); x++) {
+            // check overlap
+            let conflict = false;
+            for (let oy = 0; oy < h && !conflict; oy++) {
+              for (let ox = 0; ox < w; ox++) {
+                const tx = x + ox, ty = y + oy;
+                if (units.some(other => other !== u && (other.x <= tx && tx < (other.x + (other.size||other.w||1)) && other.y <= ty && ty < (other.y + (other.size||other.h||1))))) { conflict = true; break; }
+              }
+            }
+            if (!conflict) return { x, y };
+          }
         }
+        return { x: 0, y: 0 };
       } else {
-        if (typeof u.x !== 'number' || typeof u.y !== 'number') {
-          u.x = GRID_COLS - 1; u.y = Math.min(GRID_ROWS - 1, eIndex++);
+        // enemies default to right side
+        for (let y = 0; y <= GRID_ROWS - h; y++) {
+          for (let x = GRID_COLS - w; x >= GRID_COLS - Math.max(1, w); x--) {
+            let conflict = false;
+            for (let oy = 0; oy < h && !conflict; oy++) {
+              for (let ox = 0; ox < w; ox++) {
+                const tx = x + ox, ty = y + oy;
+                if (units.some(other => other !== u && (other.x <= tx && tx < (other.x + (other.size||other.w||1)) && other.y <= ty && ty < (other.y + (other.size||other.h||1))))) { conflict = true; break; }
+              }
+            }
+            if (!conflict) return { x, y };
+          }
         }
+        return { x: GRID_COLS - 1, y: 0 };
+      }
+    }
+
+    // place units in sensible default positions, respecting sizes
+    units.forEach(u => {
+      if (typeof u.x !== 'number' || typeof u.y !== 'number') {
+        const pos = findNextFreePosForUnit(u);
+        u.x = pos.x; u.y = pos.y;
       }
       u.visualX = u.x; u.visualY = u.y;
     });
@@ -91,8 +129,18 @@
     updateTurnWheel();
   }
 
+  function getUnitSize(u) {
+    const s = u.size || 1;
+    return { w: u.w || u.width || s, h: u.h || u.height || s };
+  }
+
+  function occupiesCell(u, x, y) {
+    const { w, h } = getUnitSize(u);
+    return u.hp > 0 && x >= u.x && x < u.x + w && y >= u.y && y < u.y + h;
+  }
+
   function getUnitAt(x, y) {
-    return units.find(u => u.x === x && u.y === y && u.hp > 0);
+    return units.find(u => occupiesCell(u, x, y));
   }
 
   function manhattan(a, b) { return Math.abs(a.x - b.x) + Math.abs(a.y - b.y); }
@@ -108,6 +156,27 @@
       return dist > 0 && dist <= attacker.range;
     }
     return dist === 1;
+  }
+
+  // check if a unit can be placed at grid coords (top-left x,y)
+  function canPlaceUnitAt(unit, x, y) {
+    const { w, h } = getUnitSize(unit);
+    // bounds
+    if (x < 0 || y < 0 || x + w > GRID_COLS || y + h > GRID_ROWS) return false;
+    // player units must be inside first two columns
+    const maxPlayerCols = 2;
+    if (unit.isPlayer) {
+      if (x + w > maxPlayerCols) return false;
+    }
+    // check overlap with other units (ignore self)
+    for (let oy = 0; oy < h; oy++) {
+      for (let ox = 0; ox < w; ox++) {
+        const tx = x + ox, ty = y + oy;
+        const other = units.find(u => u !== unit && occupiesCell(u, tx, ty));
+        if (other) return false;
+      }
+    }
+    return true;
   }
 
   function getActiveUnit() {
@@ -213,7 +282,7 @@
     let bestX = unit.x, bestY = unit.y, bestDist = minDist;
     const candidates = [ { x: unit.x + 1, y: unit.y }, { x: unit.x - 1, y: unit.y }, { x: unit.x, y: unit.y + 1 }, { x: unit.x, y: unit.y - 1 } ];
     for (let c of candidates) {
-      if (c.x >= 0 && c.x < GRID_COLS && c.y >= 0 && c.y < GRID_ROWS && !getUnitAt(c.x, c.y)) {
+      if (c.x >= 0 && c.x < GRID_COLS && c.y >= 0 && c.y < GRID_ROWS && canPlaceUnitAt(unit, c.x, c.y)) {
         const d = Math.abs(c.x - closest.x) + Math.abs(c.y - closest.y);
         if (d < bestDist && Math.abs(c.x - unit.x) + Math.abs(c.y - unit.y) <= unit.moveRange) { bestDist = d; bestX = c.x; bestY = c.y; }
       }
@@ -223,14 +292,48 @@
   }
 
   function drawGrid() {
-    ctx.save(); ctx.lineWidth = 1; const active = getActiveUnit(); const showMoveOutline = active && active.isPlayer && gameState === "playerTurn" && !active.isDead;
+    ctx.save();
+    ctx.lineWidth = 1;
+    const active = getActiveUnit();
+    const showMoveOutline = active && active.isPlayer && gameState === "playerTurn" && !active.isDead;
     for (let r = 0; r < GRID_ROWS; r++) {
       for (let c = 0; c < GRID_COLS; c++) {
-        const x = OFFSET_X + c * CELL_SIZE; const y = OFFSET_Y + r * CELL_SIZE;
-        ctx.strokeStyle = "rgba(148, 163, 184, 0.4)"; ctx.strokeRect(x, y, CELL_SIZE, CELL_SIZE);
-        if ((r + c) % 2 === 0) ctx.fillStyle = "rgba(15, 23, 42, 0.9)"; else ctx.fillStyle = "rgba(15, 23, 42, 0.7)";
+        const x = OFFSET_X + c * CELL_SIZE;
+        const y = OFFSET_Y + r * CELL_SIZE;
+        ctx.strokeStyle = "rgba(148, 163, 184, 0.4)";
+        ctx.strokeRect(x, y, CELL_SIZE, CELL_SIZE);
+        if ((r + c) % 2 === 0) ctx.fillStyle = "rgba(15, 23, 42, 0.9)";
+        else ctx.fillStyle = "rgba(15, 23, 42, 0.7)";
         ctx.fillRect(x, y, CELL_SIZE, CELL_SIZE);
-        if (showMoveOutline && !getUnitAt(c, r) && isInMoveRange(active, c, r)) { ctx.save(); ctx.strokeStyle = "rgba(34,197,94,0.9)"; ctx.lineWidth = 2; ctx.setLineDash([6,4]); ctx.strokeRect(x + 4, y + 4, CELL_SIZE - 8, CELL_SIZE - 8); ctx.restore(); }
+
+        // Highlight valid placement areas while in placement mode.
+        // For multi-cell units we draw the full w*h translucent block using the cell as top-left.
+        if (isPlacement && selectedUnit) {
+          const { w, h } = getUnitSize(selectedUnit);
+          // only draw when the top-left of the unit at (c,r) would be valid
+          if (canPlaceUnitAt(selectedUnit, c, r)) {
+            ctx.save();
+            // translucent fill for the whole unit area
+            ctx.fillStyle = "rgba(34,197,94,0.12)"; // green, subtle
+            ctx.fillRect(x + 2, y + 2, CELL_SIZE * w - 4, CELL_SIZE * h - 4);
+            // stronger stroke around the candidate placement
+            ctx.strokeStyle = "rgba(16,185,129,0.85)";
+            ctx.lineWidth = 2;
+            ctx.setLineDash([]);
+            ctx.strokeRect(x + 2, y + 2, CELL_SIZE * w - 4, CELL_SIZE * h - 4);
+            ctx.restore();
+          }
+        }
+
+        // show move-outline for active unit when relevant
+        if (showMoveOutline && isInMoveRange(active, c, r) && canPlaceUnitAt(active, c, r)) {
+          ctx.save();
+          ctx.strokeStyle = "rgba(34,197,94,0.9)";
+          ctx.lineWidth = 2;
+          ctx.setLineDash([6, 4]);
+          ctx.strokeRect(x + 4, y + 4, CELL_SIZE - 8, CELL_SIZE - 8);
+          ctx.restore();
+        }
       }
     }
     ctx.restore();
@@ -241,13 +344,24 @@
     for (let u of units) {
       const gx = (typeof u.visualX === "number") ? u.visualX : u.x;
       const gy = (typeof u.visualY === "number") ? u.visualY : u.y;
+      const { w, h } = getUnitSize(u);
       const x = OFFSET_X + gx * CELL_SIZE; const y = OFFSET_Y + gy * CELL_SIZE;
-      if (active && active.id === u.id && gameState !== "gameOver") { ctx.save(); ctx.shadowBlur = 20; ctx.shadowColor = u.isPlayer ? "#38bdf8" : "#f97316"; ctx.fillStyle = "rgba(15, 23, 42, 0.9)"; ctx.fillRect(x + 4, y + 4, CELL_SIZE - 8, CELL_SIZE - 8); ctx.restore(); }
-      ctx.save(); ctx.fillStyle = u.isPlayer ? "#3b82f6" : "#ef4444"; ctx.strokeStyle = "#020617"; ctx.lineWidth = 2; ctx.beginPath(); if (ctx.roundRect) { ctx.roundRect(x + 8, y + 8, CELL_SIZE - 16, CELL_SIZE - 16, 10); } else { ctx.rect(x + 8, y + 8, CELL_SIZE - 16, CELL_SIZE - 16); } ctx.fill(); ctx.stroke(); ctx.restore();
-      const hpRatio = u.hp / u.maxHp; const barWidth = CELL_SIZE - 16; const barX = x + 8; const barY = y + CELL_SIZE - 10;
+      // shadow for active
+      if (active && active.id === u.id && gameState !== "gameOver") {
+        ctx.save(); ctx.shadowBlur = 20; ctx.shadowColor = u.isPlayer ? "#38bdf8" : "#f97316"; ctx.fillStyle = "rgba(15, 23, 42, 0.9)"; ctx.fillRect(x + 4, y + 4, w * CELL_SIZE - 8, h * CELL_SIZE - 8); ctx.restore();
+      }
+      // body (respect multi-cell size)
+      ctx.save(); ctx.fillStyle = u.isPlayer ? "#3b82f6" : "#ef4444"; ctx.strokeStyle = "#020617"; ctx.lineWidth = 2;
+      if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(x + 8, y + 8, w * CELL_SIZE - 16, h * CELL_SIZE - 16, 10); ctx.fill(); ctx.stroke(); }
+      else { ctx.fillRect(x + 8, y + 8, w * CELL_SIZE - 16, h * CELL_SIZE - 16); ctx.strokeRect(x + 8, y + 8, w * CELL_SIZE - 16, h * CELL_SIZE - 16); }
+      ctx.restore();
+      // HP bar across the bottom of the unit
+      const hpRatio = u.hp / u.maxHp; const barWidth = w * CELL_SIZE - 16; const barX = x + 8; const barY = y + h * CELL_SIZE - 10;
       ctx.save(); ctx.fillStyle = "#1f2937"; ctx.fillRect(barX, barY, barWidth, 4); ctx.fillStyle = hpRatio > 0.5 ? "#22c55e" : hpRatio > 0.25 ? "#eab308" : "#ef4444"; ctx.fillRect(barX, barY, barWidth * hpRatio, 4); ctx.restore();
-      ctx.save(); ctx.fillStyle = "#e5e7eb"; ctx.font = "10px system-ui"; ctx.textAlign = "center"; ctx.fillText(u.name, x + CELL_SIZE / 2, y + 18); ctx.fillText(`${u.hp}/${u.maxHp}`, x + CELL_SIZE / 2, y + CELL_SIZE / 2 + 4); ctx.restore();
-      if (isPlacement && u.isPlayer && selectedUnit && selectedUnit.id === u.id) { ctx.save(); ctx.strokeStyle = '#facc15'; ctx.lineWidth = 4; ctx.strokeRect(x + 6, y + 6, CELL_SIZE - 12, CELL_SIZE - 12); ctx.restore(); }
+      // text centered on unit
+      ctx.save(); ctx.fillStyle = "#e5e7eb"; ctx.font = "10px system-ui"; ctx.textAlign = "center"; ctx.fillText(u.name, x + (w * CELL_SIZE) / 2, y + 18); ctx.fillText(`${u.hp}/${u.maxHp}`, x + (w * CELL_SIZE) / 2, y + (h * CELL_SIZE) / 2 + 4); ctx.restore();
+      // highlight top-left for selected in placement
+      if (isPlacement && u.isPlayer && selectedUnit && selectedUnit.id === u.id) { ctx.save(); ctx.strokeStyle = '#facc15'; ctx.lineWidth = 4; ctx.strokeRect(x + 6, y + 6, w * CELL_SIZE - 12, h * CELL_SIZE - 12); ctx.restore(); }
     }
   }
 
@@ -304,15 +418,31 @@
     if (gx < 0 || gx >= GRID_COLS || gy < 0 || gy >= GRID_ROWS) return;
     if (isPlacement || gameState === 'placement') {
       const clicked = getUnitAt(gx, gy);
-      if (clicked && clicked.isPlayer) { selectedUnit = clicked; setMessage('Юніт вибрано. Клікніть по клітинці щоб поставити його.'); return; }
+      if (clicked && clicked.isPlayer) {
+        selectedUnit = clicked;
+        setMessage('Юніт вибрано. Клікніть по клітинці щоб поставити його.');
+        return;
+      }
       if (!clicked) {
         if (!selectedUnit) {
           const candidates = units.filter(u => u.isPlayer && u.hp > 0);
-          if (candidates.length > 0) { let best = null; let bestDist = Infinity; for (let u of candidates) { const d = Math.abs(u.x - gx) + Math.abs(u.y - gy); if (d < bestDist) { best = u; bestDist = d; } } selectedUnit = best; }
+          if (candidates.length > 0) {
+            let best = null; let bestDist = Infinity;
+            for (let u of candidates) {
+              const d = Math.abs(u.x - gx) + Math.abs(u.y - gy);
+              if (d < bestDist) { best = u; bestDist = d; }
+            }
+            selectedUnit = best;
+          }
         }
         if (!selectedUnit) { setMessage('Немає доступних юнітів для розміщення.'); return; }
-        const other = getUnitAt(gx, gy);
-        if (other) { setMessage('Тут вже стоїть юніт. Виберіть інше місце.'); return; }
+
+        // attempt to place the selected unit with top-left at (gx,gy)
+        if (!canPlaceUnitAt(selectedUnit, gx, gy)) {
+          setMessage('Неможливо поставити юніта сюди. Спробуйте іншу клітинку (тільки перші 2 колонки для розміщення).');
+          return;
+        }
+
         selectedUnit.x = gx; selectedUnit.y = gy; selectedUnit.visualX = gx; selectedUnit.visualY = gy;
         try { recordedMoves.push({ type: 'place', time: Date.now(), unitId: selectedUnit.id, x: gx, y: gy }); } catch (err) {}
         selectedUnit = null; setMessage('Юніт поставлено. Виберіть наступний або натисніть "Почати бій".'); updateTurnWheel(); return;
@@ -321,7 +451,16 @@
     }
     if (gameState !== "playerTurn") return; const active = getActiveUnit(); if (!active || !active.isPlayer || active.hp <= 0) return; const target = getUnitAt(gx, gy);
     if (target && !target.isPlayer) { if (isInAttackRange(active, target)) { performAttack(active, target); setTimeout(() => endTurn(), 260); } else { setMessage("Ціль занадто далеко для атаки."); } return; }
-    if (!target) { if (isInMoveRange(active, gx, gy)) { moveUnit(active, gx, gy); setTimeout(() => endTurn(), 260); } else { setMessage("Точка занадто далеко для руху."); } }
+    if (!target) {
+      if (!isInMoveRange(active, gx, gy)) {
+        setMessage("Точка занадто далеко для руху.");
+      } else if (!canPlaceUnitAt(active, gx, gy)) {
+        setMessage("Не можна рухатися сюди — зайнято або не в межах дозволених колонок.");
+      } else {
+        moveUnit(active, gx, gy);
+        setTimeout(() => endTurn(), 260);
+      }
+    }
   });
 
   restartBtn.addEventListener("click", () => { enterPlacementMode(); });
