@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8" />
+  <title>BrowserStrategy — старт</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: system-ui,Segoe UI,Roboto,Arial; background:#0b1220; color:#e6eef8; margin:0; }
+    .container { max-width:980px; margin:32px auto; padding:20px; }
+    header { display:flex; justify-content:space-between; align-items:center; }
+    h1 { margin:0 0 8px 0; font-size:20px; }
+    .actions { display:flex; gap:8px; }
+    button, a.button { background:#2563eb; color:white; border:none; padding:10px 14px; border-radius:8px; text-decoration:none; }
+    .card { background:#071028; padding:12px; border-radius:10px; margin-top:16px; box-shadow:0 6px 18px rgba(0,0,0,0.6); }
+    table { width:100%; border-collapse:collapse; }
+    th, td { text-align:left; padding:8px; border-bottom:1px solid rgba(255,255,255,0.04); }
+    .muted { color:#94a3b8; font-size:13px; }
+    .stat { display:inline-block; margin-right:12px; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div>
+      <h1>BrowserStrategy — панель</h1>
+      <div class="muted">Почни бій, переглянь статистику та історію матчів</div>
+    </div>
+    <div class="actions">
+      <a class="button" id="btn-start" href="/battle_page.html">Почати бій</a>
+      <button id="btn-refresh">Оновити</button>
+    </div>
+  </header>
+
+  <section class="card" id="stats">
+    <h3>Статистика</h3>
+    <div id="stats-container" class="muted">Завантаження...</div>
+  </section>
+
+  <section class="card" id="history">
+    <h3>Історія боїв (за часом)</h3>
+    <div class="muted">Покажу останні <select id="limit-select"><option>10</option><option>25</option><option>50</option></select> боїв</div>
+    <div style="margin-top:8px;">
+      <table id="history-table">
+        <thead><tr><th>id</th><th>час</th><th>winner</th><th>раунд</th><th>деталі</th></tr></thead>
+        <tbody><tr><td colspan="5" class="muted">Завантаження...</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<script>
+async function fetchStats() {
+  const el = document.getElementById('stats-container');
+  try {
+    const resp = await fetch('/api/matches/stats');
+    if (!resp.ok) throw new Error('network');
+    const data = await resp.json();
+    // convert to map
+    const map = {};
+    data.forEach(r => map[r.winner] = r.cnt);
+    el.innerHTML = `
+      <span class="stat">Перемог: <strong>${map.player||0}</strong></span>
+      <span class="stat">Поразок: <strong>${map.enemy||0}</strong></span>
+      <span class="stat">Нічия: <strong>${map.draw||0}</strong></span>
+    `;
+  } catch (e) {
+    el.textContent = 'Не вдалося завантажити статистику.';
+    console.warn(e);
+  }
+}
+
+function formatDate(iso) {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString();
+  } catch { return iso; }
+}
+
+async function fetchHistory(limit=10) {
+  const tbody = document.querySelector('#history-table tbody');
+  tbody.innerHTML = '<tr><td colspan="5" class="muted">Завантаження...</td></tr>';
+  try {
+    const resp = await fetch('/api/matches?limit='+encodeURIComponent(limit));
+    if (!resp.ok) throw new Error('network');
+    const rows = await resp.json();
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="muted">Історія порожня</td></tr>';
+      return;
+    }
+    tbody.innerHTML = '';
+    for (const r of rows) {
+      const details = JSON.stringify(r.details || {}).slice(0,120);
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${r.id}</td><td>${formatDate(r.played_at)}</td><td>${r.winner}</td><td>${r.round}</td><td><code>${details}</code></td>`;
+      tbody.appendChild(tr);
+    }
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="5" class="muted">Не вдалося завантажити історію.</td></tr>';
+    console.warn(e);
+  }
+}
+
+document.getElementById('btn-refresh').addEventListener('click', ()=>{
+  const limit = Number(document.getElementById('limit-select').value) || 10;
+  fetchStats(); fetchHistory(limit);
+});
+
+document.getElementById('limit-select').addEventListener('change', ()=>{
+  const limit = Number(document.getElementById('limit-select').value) || 10;
+  fetchHistory(limit);
+});
+
+// initial
+fetchStats(); fetchHistory(Number(document.getElementById('limit-select').value)||10);
+</script>
+</body>
+</html>

@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8" />
+  <title>Перегляд бою</title>
+  <style>
+    body { background:#071033; color:#e6eef8; font-family:system-ui; display:flex; flex-direction:column; align-items:center; padding:20px }
+    canvas { background: radial-gradient(circle at top, #1e293b 0, #020617 55%); border-radius:12px }
+    #controls { margin-top:12px }
+    button { padding:8px 12px; border-radius:8px; border:none; background:#2563eb; color:white; cursor:pointer }
+  </style>
+</head>
+<body>
+  <h2>Перегляд бою</h2>
+  <canvas id="replay-canvas" width="800" height="480"></canvas>
+  <div id="controls">
+    <button id="btn-play">Play</button>
+    <button id="btn-pause">Pause</button>
+    <button id="btn-step">Next</button>
+    <a id="back" href="/">Назад</a>
+  </div>
+
+  <script>
+  // Simple replay: fetch match by id and apply recorded moves sequentially.
+  (async function(){
+    const params = new URLSearchParams(location.search);
+    const id = params.get('id');
+    if (!id) {
+      document.body.insertAdjacentHTML('beforeend','<p style="color:#f88">Не вказано id матчу у параметрах запиту.</p>');
+      return;
+    }
+    const canvas = document.getElementById('replay-canvas');
+    const ctx = canvas.getContext('2d');
+    const GRID_COLS = 10, GRID_ROWS = 6, CELL_SIZE = 64;
+    const OFFSET_X = (canvas.width - GRID_COLS * CELL_SIZE) / 2;
+    const OFFSET_Y = (canvas.height - GRID_ROWS * CELL_SIZE) / 2;
+
+    async function fetchMatch() {
+      const r = await fetch(`/api/matches/${encodeURIComponent(id)}`);
+      if (!r.ok) throw new Error('Failed to load match');
+      return await r.json();
+    }
+
+    let match;
+    try { match = await fetchMatch(); } catch (e) { document.body.insertAdjacentHTML('beforeend','<p style="color:#f88">Помилка завантаження матчу.</p>'); console.error(e); return; }
+
+    const details = match.details || {};
+    const units = (details.units || []).map(u=>Object.assign({},u));
+    const moves = details.moves || [];
+
+    // find unit by id in current units
+    function findUnit(id){ return units.find(u=>u.id===id); }
+
+    function draw() {
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      // grid
+      ctx.strokeStyle = 'rgba(148,163,184,0.25)';
+      for (let r=0;r<GRID_ROWS;r++){
+        for (let c=0;c<GRID_COLS;c++){
+          const x = OFFSET_X + c*CELL_SIZE;
+          const y = OFFSET_Y + r*CELL_SIZE;
+          ctx.strokeRect(x,y,CELL_SIZE,CELL_SIZE);
+        }
+      }
+      // units
+      for (let u of units) {
+        const x = OFFSET_X + (u.visualX ?? u.x) * CELL_SIZE;
+        const y = OFFSET_Y + (u.visualY ?? u.y) * CELL_SIZE;
+        ctx.fillStyle = u.isPlayer ? '#3b82f6' : '#ef4444';
+        ctx.fillRect(x+8,y+8,CELL_SIZE-16,CELL_SIZE-16);
+        ctx.fillStyle = '#e5e7eb';
+        ctx.font = '10px system-ui';
+        ctx.textAlign='center';
+        ctx.fillText(u.name, x+CELL_SIZE/2, y+18);
+        ctx.fillText(`${u.hp || u.maxHp}/${u.maxHp}`, x+CELL_SIZE/2, y+CELL_SIZE/2+4);
+      }
+    }
+
+    draw();
+
+    // playback state
+    let idx = 0;
+    let playing = false;
+    let timer = null;
+
+    function applyMove(m) {
+      if (!m) return;
+      if (m.type === 'move'){
+        const u = findUnit(m.unitId);
+        if (u){ u.x = m.to.x; u.y = m.to.y; u.visualX = m.to.x; u.visualY = m.to.y; }
+      } else if (m.type === 'attack'){
+        const t = findUnit(m.targetId);
+        if (t){ t.hp = m.targetHp; }
+      } else if (m.type === 'kill'){
+        // remove victim
+        const vi = units.findIndex(x=>x.id===m.victimId);
+        if (vi!==-1) units.splice(vi,1);
+      } else if (m.type === 'start'){
+        // replace units snapshot
+        // ignore here
+      }
+      draw();
+    }
+
+    function step() {
+      if (idx >= moves.length) { stop(); return; }
+      const m = moves[idx++];
+      applyMove(m);
+    }
+
+    function start() {
+      if (playing) return; playing = true;
+      timer = setInterval(()=>{ step(); }, 600);
+    }
+    function stop(){ playing=false; if (timer){ clearInterval(timer); timer=null;} }
+    function next(){ step(); }
+
+    document.getElementById('btn-play').addEventListener('click', start);
+    document.getElementById('btn-pause').addEventListener('click', stop);
+    document.getElementById('btn-step').addEventListener('click', next);
+
+  })();
+  </script>
+</body>
+</html>

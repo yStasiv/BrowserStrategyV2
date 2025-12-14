@@ -1,0 +1,80 @@
+[
+  {
+    "id": "p1",
+    "name": "Рицар",
+    "isPlayer": true,
+    "x": 1,
+    "y": 2,
+    "hp": 30,
+    "maxHp": 30,
+    "attack": 8,
+    "moveRange": 2,
+    "initiative": 12,
+    "range": 1
+  },
+  {
+    "id": "p2",
+    "name": "Лучник",
+    "isPlayer": true,
+    "x": 2,
+    "y": 3,
+    "hp": 18,
+    "maxHp": 18,
+    "attack": 6,
+    "moveRange": 2,
+    "initiative": 16,
+    "range": 3
+  },
+  {
+    "id": "p3",
+    "name": "Лікар",
+    "isPlayer": true,
+    "x": 0,
+    "y": 2,
+    "hp": 20,
+    "maxHp": 20,
+    "attack": 4,
+    "moveRange": 1,
+    "initiative": 10,
+    "range": 1
+  },
+  {
+    "id": "e1",
+    "name": "Орк",
+    "isPlayer": false,
+    "x": 8,
+    "y": 2,
+    "hp": 26,
+    "maxHp": 26,
+    "attack": 7,
+    "moveRange": 2,
+    "initiative": 11,
+    "range": 1
+  },
+  {
+    "id": "e2",
+    "name": "Гобл. лучник",
+    "isPlayer": false,
+    "x": 7,
+    "y": 3,
+    "hp": 14,
+    "maxHp": 14,
+    "attack": 5,
+    "moveRange": 2,
+    "initiative": 15,
+    "range": 3
+  },
+  {
+    "id": "e3",
+    "name": "Брут",
+    "isPlayer": false,
+    "x": 9,
+    "y": 2,
+    "hp": 34,
+    "maxHp": 34,
+    "attack": 9,
+    "moveRange": 1,
+    "initiative": 9,
+    "range": 1
+  }
+]

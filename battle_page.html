@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <title>Бій у стилі Heroes</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #111827;
+      color: #e5e7eb;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    #wrapper {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: #020617;
+      padding: 12px;
+      border-radius: 16px;
+      box-shadow: 0 15px 40px rgba(0,0,0,0.6);
+      max-width: 980px;
+    }
+    #top-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 14px;
+      gap: 12px;
+    }
+    #message {
+      min-width: 260px;
+    }
+    #btn-restart {
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: none;
+      cursor: pointer;
+      font-size: 13px;
+      background: #22c55e;
+      color: #022c22;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    #btn-restart:hover {
+      filter: brightness(1.1);
+    }
+    #turn-wheel {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      font-size: 12px;
+      margin-top: 2px;
+      margin-bottom: 4px;
+    }
+    #turn-wheel-label {
+      margin-right: 6px;
+      color: #9ca3af;
+      white-space: nowrap;
+    }
+    .turn-item {
+      width: 26px;
+      height: 26px;
+      border-radius: 999px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 600;
+      border: 1px solid rgba(15,23,42,0.9);
+      box-shadow: 0 0 0 1px rgba(15,23,42,0.7);
+      opacity: 0.75;
+    }
+    .turn-item.player { background: #1d4ed8; color: #e5e7eb; }
+    .turn-item.enemy { background: #b91c1c; color: #fee2e2; }
+    .turn-item.active {
+      opacity: 1;
+      box-shadow: 0 0 0 2px #fbbf24;
+      transform: scale(1.05);
+    }
+    canvas {
+      border-radius: 12px;
+      cursor: pointer;
+      background: radial-gradient(circle at top, #1e293b 0, #020617 55%);
+    }
+    #hint {
+      font-size: 12px;
+      color: #9ca3af;
+      text-align: center;
+    }
+    /* result modal */
+    #result-modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(2,6,23,0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+    }
+    #result-modal {
+      background: #071033;
+      color: #e6eef8;
+      padding: 18px;
+      border-radius: 12px;
+      max-width: 420px;
+      width: 92%;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+      text-align: center;
+    }
+    #result-modal h2 { margin: 0 0 8px 0; font-size: 20px; }
+    #result-modal p { margin: 0 0 12px 0; color: #9ca3af; }
+    .modal-actions { display:flex; gap:8px; justify-content:center; margin-top:12px; }
+    .modal-actions a, .modal-actions button {
+      background: #2563eb; color: white; padding:8px 12px; border-radius:8px; border:none; text-decoration:none; cursor:pointer;
+    }
+  </style>
+</head>
+<body>
+<div id="wrapper">
+  <div id="top-bar">
+    <div>
+      <div id="message">Клікни по клітинці, щоб походити.</div>
+      <div id="turn-wheel">
+        <span id="turn-wheel-label">Черга ходів:</span>
+        <!-- елементи черги малюються скриптом -->
+      </div>
+    </div>
+    <button id="btn-restart">Перезапустити бій</button>
+    <button id="btn-reset-units">Скинути юнітів</button>
+  </div>
+  <canvas id="battlefield" width="800" height="480"></canvas>
+  <div id="hint">
+    Гравець: сині юніти. Ворог: червоні. Клік по порожній клітинці — рух, клік по ворогу (в радіусі) — атака.
+  </div>
+  <!-- Result modal overlay -->
+  <div id="result-modal-overlay" aria-hidden="true">
+    <div id="result-modal" role="dialog" aria-modal="true">
+      <h2 id="result-title">Результат бою</h2>
+      <p id="result-message">Хто переміг...</p>
+      <div class="modal-actions">
+        <a id="btn-to-stats" href="/">Перейти до статистики</a>
+        <a id="btn-replay" href="#" style="display:none;">Переглянути бій</a>
+        <button id="btn-restart-modal">Перезапустити бій</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- load units from JSON via the loader (sets window.INITIAL_UNITS) -->
+<script src="/units-loader.js"></script>
+
+<script>
+(() => {
+  const canvas = document.getElementById("battlefield");
+  const ctx = canvas.getContext("2d");
+  const msgEl = document.getElementById("message");
+  const restartBtn = document.getElementById("btn-restart");
+  const turnWheelEl = document.getElementById("turn-wheel");
+  const turnWheelLabel = document.getElementById("turn-wheel-label");
+
+  const GRID_COLS = 10;
+  const GRID_ROWS = 6;
+  const CELL_SIZE = 64;
+  const OFFSET_X = (canvas.width - GRID_COLS * CELL_SIZE) / 2;
+  const OFFSET_Y = (canvas.height - GRID_ROWS * CELL_SIZE) / 2;
+
+  let units = [];
+  let turnOrder = [];
+  let currentIndex = 0;
+  let gameState = "playerTurn"; // "playerTurn" | "aiTurn" | "gameOver"
+  let roundNumber = 1;
+  // Recorded moves for this match (sent to server as part of details)
+  let recordedMoves = [];
+
+  // для анімацій руху
+  let animations = [];
+  let lastTimestamp = 0;
+
+  // createInitialUnits now reads from `window.INITIAL_UNITS` which is
+  // provided by `units.js` (included before this script). We deep-clone
+  // the array so later mutations don't affect the source.
+  function createInitialUnits() {
+    if (window.INITIAL_UNITS && Array.isArray(window.INITIAL_UNITS)) {
+      return JSON.parse(JSON.stringify(window.INITIAL_UNITS));
+    }
+    // fallback: empty array if units.js not loaded
+    return [];
+  }
+
+  function initBattle() {
+    units = createInitialUnits();
+    turnOrder = [...units].sort((a, b) => b.initiative - a.initiative);
+    currentIndex = 0;
+    roundNumber = 1;
+    gameState = turnOrder[0].isPlayer ? "playerTurn" : "aiTurn";
+    animations = [];
+    // reset recorded moves and add initial snapshot
+    recordedMoves = [];
+    recordedMoves.push({ type: 'start', time: Date.now(), units: JSON.parse(JSON.stringify(units)) });
+    setMessage("Раунд 1. Твій хід. Обери дію для активного юніта.");
+    if (gameState === "aiTurn") {
+      aiTurnWithDelay();
+    }
+    updateTurnWheel();
+  }
+
+  function getUnitAt(x, y) {
+    return units.find(u => u.x === x && u.y === y && u.hp > 0);
+  }
+
+  function manhattan(a, b) {
+    return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
+  }
+
+  function isInMoveRange(unit, tx, ty) {
+    const dist = Math.abs(unit.x - tx) + Math.abs(unit.y - ty);
+    return dist > 0 && dist <= unit.moveRange;
+  }
+
+  function isInAttackRange(attacker, target) {
+    const dist = manhattan(attacker, target);
+    if (attacker.range && attacker.range > 1) {
+      return dist > 0 && dist <= attacker.range;
+    }
+    return dist === 1;
+  }
+
+  function getActiveUnit() {
+    if (!turnOrder.length) return null;
+    if (currentIndex < 0 || currentIndex >= turnOrder.length) return null;
+    const u = turnOrder[currentIndex];
+    return u && u.hp > 0 ? u : null;
+  }
+
+  function nextAliveIndex(startIdx) {
+    if (!turnOrder.length) return -1;
+    let idx = startIdx;
+    let loops = 0;
+    while (loops < turnOrder.length) {
+      if (idx >= turnOrder.length) idx = 0;
+      const u = turnOrder[idx];
+      if (u && u.hp > 0) return idx;
+      idx++;
+      loops++;
+    }
+    return -1;
+  }
+
+  function checkVictory() {
+    const anyPlayer = units.some(u => u.isPlayer && u.hp > 0);
+    const anyEnemy = units.some(u => !u.isPlayer && u.hp > 0);
+    if (!anyPlayer || !anyEnemy) {
+      gameState = "gameOver";
+      let winner;
+      if (!anyPlayer && !anyEnemy) {
+        setMessage(`Раунд ${roundNumber}. Нічия. Усі полягли в бою.`);
+        winner = 'draw';
+      } else if (!anyEnemy) {
+        setMessage(`Раунд ${roundNumber}. Перемога! Ти знищив усіх ворогів.`);
+        winner = 'player';
+      } else {
+        setMessage(`Раунд ${roundNumber}. Поразка. Ворог переміг.`);
+        winner = 'enemy';
+      }
+
+      // Надсилаємо результат на бекенд (якщо доступний)
+      try {
+        const payload = {
+          winner,
+          round: roundNumber,
+          units: units.map(u => ({ id: u.id, name: u.name, isPlayer: u.isPlayer, hp: u.hp, maxHp: u.maxHp, attack: u.attack }))
+        };
+        if (typeof sendMatchResult === 'function') {
+          sendMatchResult(payload);
+        }
+        // show modal with result and allow user to go to stats
+        try {
+          showResultModal(winner);
+        } catch (e) {
+          console.warn('Failed to show result modal', e);
+        }
+      } catch (err) {
+        // не заважати грі помилками мережі
+        console.warn('Unable to send match result', err);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  function performAttack(attacker, target) {
+    const dmg = attacker.attack;
+    target.hp = Math.max(0, target.hp - dmg);
+    // record attack
+    try { recordedMoves.push({ type: 'attack', time: Date.now(), attackerId: attacker.id, targetId: target.id, damage: dmg, targetHp: target.hp }); } catch(e){}
+    setMessage(`${attacker.name} б'є ${target.name} на ${dmg} урону.`);
+    if (target.hp <= 0) {
+      setMessage(`${attacker.name} вбиває ${target.name}!`);
+      units = units.filter(u => u.hp > 0);
+      turnOrder = turnOrder.filter(u => u.hp > 0);
+      try { recordedMoves.push({ type: 'kill', time: Date.now(), killerId: attacker.id, victimId: target.id }); } catch(e){}
+    }
+    updateTurnWheel();
+  }
+
+  function moveUnit(unit, tx, ty) {
+    const fromX = unit.x;
+    const fromY = unit.y;
+    unit.x = tx;
+    unit.y = ty;
+    // анімація: плавний перехід visualX/Y
+    animations.push({
+      unit,
+      fromX,
+      fromY,
+      toX: tx,
+      toY: ty,
+      elapsed: 0,
+      duration: 220
+    });
+    // record move
+    try { recordedMoves.push({ type: 'move', time: Date.now(), unitId: unit.id, from: { x: fromX, y: fromY }, to: { x: tx, y: ty } }); } catch(e){}
+    setMessage(`${unit.name} рухається на (${tx + 1}, ${ty + 1}).`);
+  }
+
+  function endTurn() {
+    if (checkVictory()) {
+      updateTurnWheel();
+      return;
+    }
+
+    const prevIndex = currentIndex;
+    currentIndex = nextAliveIndex(currentIndex + 1);
+    if (currentIndex === -1) {
+      currentIndex = nextAliveIndex(0);
+    }
+
+    // якщо перейшли через початок — новий раунд
+    if (currentIndex !== -1 && currentIndex <= prevIndex) {
+      roundNumber += 1;
+    }
+
+    const active = getActiveUnit();
+    if (!active) {
+      updateTurnWheel();
+      return;
+    }
+
+    if (active.isPlayer) {
+      gameState = "playerTurn";
+      setMessage(`Раунд ${roundNumber}. Твій хід. Активний юніт: ${active.name}.`);
+    } else {
+      gameState = "aiTurn";
+      setMessage(`Раунд ${roundNumber}. Хід ворога. Активний юніт: ${active.name}.`);
+      aiTurnWithDelay();
+    }
+    updateTurnWheel();
+  }
+
+  // ===== AI =====
+  function aiTurnWithDelay() {
+    if (gameState !== "aiTurn" || !getActiveUnit()) return;
+    setTimeout(() => {
+      aiAct();
+    }, 450);
+  }
+
+  function aiAct() {
+    if (gameState !== "aiTurn") return;
+    const unit = getActiveUnit();
+    if (!unit || unit.isPlayer || unit.hp <= 0) return;
+
+    const targets = units.filter(u => u.isPlayer && u.hp > 0);
+    if (!targets.length) {
+      checkVictory();
+      return;
+    }
+
+    let closest = targets[0];
+    let minDist = manhattan(unit, closest);
+    for (let t of targets) {
+      const d = manhattan(unit, t);
+      if (d < minDist) {
+        minDist = d;
+        closest = t;
+      }
+    }
+
+    if (isInAttackRange(unit, closest)) {
+      performAttack(unit, closest);
+      setTimeout(() => endTurn(), 260);
+      return;
+    }
+
+    // рух до цілі (одна клітинка в бік цілі)
+    let bestX = unit.x;
+    let bestY = unit.y;
+    let bestDist = minDist;
+
+    const candidates = [
+      { x: unit.x + 1, y: unit.y },
+      { x: unit.x - 1, y: unit.y },
+      { x: unit.x, y: unit.y + 1 },
+      { x: unit.x, y: unit.y - 1 }
+    ];
+
+    for (let c of candidates) {
+      if (
+        c.x >= 0 && c.x < GRID_COLS &&
+        c.y >= 0 && c.y < GRID_ROWS &&
+        !getUnitAt(c.x, c.y)
+      ) {
+        const d = Math.abs(c.x - closest.x) + Math.abs(c.y - closest.y);
+        if (d < bestDist && Math.abs(c.x - unit.x) + Math.abs(c.y - unit.y) <= unit.moveRange) {
+          bestDist = d;
+          bestX = c.x;
+          bestY = c.y;
+        }
+      }
+    }
+
+    if (bestX !== unit.x || bestY !== unit.y) {
+      moveUnit(unit, bestX, bestY);
+    } else {
+      setMessage(`${unit.name} не може вигідно рухатися й пропускає хід.`);
+    }
+
+    setTimeout(() => endTurn(), 260);
+  }
+
+  // ===== Рендер =====
+  function drawGrid() {
+    ctx.save();
+    ctx.lineWidth = 1;
+    const active = getActiveUnit();
+    const showMoveOutline = active && active.isPlayer && gameState === "playerTurn" && !active.isDead;
+
+    for (let r = 0; r < GRID_ROWS; r++) {
+      for (let c = 0; c < GRID_COLS; c++) {
+        const x = OFFSET_X + c * CELL_SIZE;
+        const y = OFFSET_Y + r * CELL_SIZE;
+
+        // плитка
+        ctx.strokeStyle = "rgba(148, 163, 184, 0.4)";
+        ctx.strokeRect(x, y, CELL_SIZE, CELL_SIZE);
+
+        if ((r + c) % 2 === 0) {
+          ctx.fillStyle = "rgba(15, 23, 42, 0.9)";
+        } else {
+          ctx.fillStyle = "rgba(15, 23, 42, 0.7)";
+        }
+        ctx.fillRect(x, y, CELL_SIZE, CELL_SIZE);
+
+        // контур можливого руху
+        if (showMoveOutline && !getUnitAt(c, r) && isInMoveRange(active, c, r)) {
+          ctx.save();
+          ctx.strokeStyle = "rgba(34,197,94,0.9)";
+          ctx.lineWidth = 2;
+          ctx.setLineDash([6, 4]);
+          ctx.strokeRect(x + 4, y + 4, CELL_SIZE - 8, CELL_SIZE - 8);
+          ctx.restore();
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  function drawUnits() {
+    const active = getActiveUnit();
+    for (let u of units) {
+      const gx = (typeof u.visualX === "number") ? u.visualX : u.x;
+      const gy = (typeof u.visualY === "number") ? u.visualY : u.y;
+      const x = OFFSET_X + gx * CELL_SIZE;
+      const y = OFFSET_Y + gy * CELL_SIZE;
+
+      // аура активного
+      if (active && active.id === u.id && gameState !== "gameOver") {
+        ctx.save();
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = u.isPlayer ? "#38bdf8" : "#f97316";
+        ctx.fillStyle = "rgba(15, 23, 42, 0.9)";
+        ctx.fillRect(x + 4, y + 4, CELL_SIZE - 8, CELL_SIZE - 8);
+        ctx.restore();
+      }
+
+      // тіло
+      ctx.save();
+      ctx.fillStyle = u.isPlayer ? "#3b82f6" : "#ef4444";
+      ctx.strokeStyle = "#020617";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      if (ctx.roundRect) {
+        ctx.roundRect(x + 8, y + 8, CELL_SIZE - 16, CELL_SIZE - 16, 10);
+      } else {
+        ctx.rect(x + 8, y + 8, CELL_SIZE - 16, CELL_SIZE - 16);
+      }
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+
+      // HP бар
+      const hpRatio = u.hp / u.maxHp;
+      const barWidth = CELL_SIZE - 16;
+      const barX = x + 8;
+      const barY = y + CELL_SIZE - 10;
+
+      ctx.save();
+      ctx.fillStyle = "#1f2937";
+      ctx.fillRect(barX, barY, barWidth, 4);
+      ctx.fillStyle = hpRatio > 0.5 ? "#22c55e" : hpRatio > 0.25 ? "#eab308" : "#ef4444";
+      ctx.fillRect(barX, barY, barWidth * hpRatio, 4);
+      ctx.restore();
+
+      // текст
+      ctx.save();
+      ctx.fillStyle = "#e5e7eb";
+      ctx.font = "10px system-ui";
+      ctx.textAlign = "center";
+      ctx.fillText(u.name, x + CELL_SIZE / 2, y + 18);
+      ctx.fillText(`${u.hp}/${u.maxHp}`, x + CELL_SIZE / 2, y + CELL_SIZE / 2 + 4);
+      ctx.restore();
+    }
+  }
+
+  function drawTurnInfo() {
+    const active = getActiveUnit();
+    if (!active) return;
+
+    ctx.save();
+    ctx.font = "14px system-ui";
+    ctx.textAlign = "left";
+    const textY = OFFSET_Y - 16;
+    const textX = OFFSET_X;
+
+    const role = active.isPlayer ? "Твій юніт" : "Ворог";
+    const sideColor = active.isPlayer ? "#38bdf8" : "#f97316";
+
+    ctx.fillStyle = "#e5e7eb";
+    ctx.fillText(`${role}: ${active.name}`, textX, textY);
+
+    ctx.fillStyle = sideColor;
+    ctx.fillText(`Хід: ${active.isPlayer ? "гравця" : "AI"}`, textX + 200, textY);
+
+    ctx.fillStyle = "#9ca3af";
+    ctx.fillText(`Раунд: ${roundNumber}`, textX + 360, textY);
+    ctx.restore();
+  }
+
+  function render() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawGrid();
+    drawUnits();
+    drawTurnInfo();
+  }
+
+  function setMessage(text) {
+    msgEl.textContent = text;
+  }
+
+  // ===== Відправка результатів матчу на бекенд =====
+  async function sendMatchResult(payload) {
+    try {
+      // Відправляємо запит на відносний шлях; якщо сервер запущено локально, це /api/matches
+      const resp = await fetch('/api/matches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!resp.ok) {
+        console.warn('Server returned non-OK when saving match:', resp.status);
+      } else {
+        const data = await resp.json();
+        console.log('Match saved, id=', data.id);
+        // store last saved id so we can show a replay link
+        try { window.__last_saved_match_id = data.id; } catch(e){}
+      }
+    } catch (e) {
+      console.warn('Failed to send match result', e);
+    }
+  }
+
+  // ===== Result modal handling =====
+  const resultOverlay = document.getElementById('result-modal-overlay');
+  const resultTitle = document.getElementById('result-title');
+  const resultMessage = document.getElementById('result-message');
+  const btnRestartModal = document.getElementById('btn-restart-modal');
+  const btnReplay = document.getElementById('btn-replay');
+
+  function showResultModal(winner) {
+    let title = 'Результат бою';
+    let message = '';
+    if (winner === 'player') {
+      title = 'Перемога!';
+      message = 'Ти переміг усіх ворогів.';
+    } else if (winner === 'enemy') {
+      title = 'Поразка';
+      message = 'Ворог переміг.';
+    } else {
+      title = 'Нічия';
+      message = 'Бій закінчився внічию.';
+    }
+    resultTitle.textContent = title;
+    resultMessage.textContent = message;
+    resultOverlay.style.display = 'flex';
+    resultOverlay.setAttribute('aria-hidden', 'false');
+    // if we just saved the match and have an id, show replay link
+    try {
+      if (window.__last_saved_match_id) {
+        btnReplay.style.display = 'inline-block';
+        btnReplay.href = `/replay.html?id=${window.__last_saved_match_id}`;
+      } else {
+        btnReplay.style.display = 'none';
+      }
+    } catch (e) {
+      console.warn('Failed to set replay link', e);
+    }
+  }
+
+  function hideResultModal() {
+    resultOverlay.style.display = 'none';
+    resultOverlay.setAttribute('aria-hidden', 'true');
+  }
+
+  btnRestartModal.addEventListener('click', () => {
+    hideResultModal();
+    initBattle();
+  });
+
+  // ===== Turn wheel UI =====
+  function updateTurnWheel() {
+    // очистити всі елементи, крім лейбла
+    while (turnWheelEl.children.length > 1) {
+      turnWheelEl.removeChild(turnWheelEl.lastChild);
+    }
+
+    if (!turnOrder.length) return;
+
+    const ordered = [];
+    const len = turnOrder.length;
+    if (len === 0) return;
+
+    let start = currentIndex;
+    if (start < 0 || start >= len) start = 0;
+
+    for (let i = 0; i < len; i++) {
+      const idx = (start + i) % len;
+      const u = turnOrder[idx];
+      if (!u || u.hp <= 0) continue;
+      ordered.push({ unit: u, isActive: i === 0 });
+    }
+
+    ordered.forEach(entry => {
+      const u = entry.unit;
+      const div = document.createElement("div");
+      div.classList.add("turn-item");
+      div.classList.add(u.isPlayer ? "player" : "enemy");
+      if (entry.isActive && gameState !== "gameOver") {
+        div.classList.add("active");
+      }
+      const label = u.name.slice(0, 2).toUpperCase();
+      div.textContent = label;
+      turnWheelEl.appendChild(div);
+    });
+
+    turnWheelLabel.textContent = `Черга ходів (раунд ${roundNumber}):`;
+  }
+
+  // ===== Анімаційний цикл =====
+  function updateAnimations(deltaMs) {
+    if (!animations.length) return;
+    const toRemove = [];
+    animations.forEach((anim, index) => {
+      anim.elapsed += deltaMs;
+      const t = Math.min(1, anim.elapsed / anim.duration);
+      // лінійна інтерполяція між клітинками
+      anim.unit.visualX = anim.fromX + (anim.toX - anim.fromX) * t;
+      anim.unit.visualY = anim.fromY + (anim.toY - anim.fromY) * t;
+      if (t >= 1) {
+        anim.unit.visualX = anim.toX;
+        anim.unit.visualY = anim.toY;
+        toRemove.push(index);
+      }
+    });
+    // видаляємо завершені анімації
+    for (let i = toRemove.length - 1; i >= 0; i--) {
+      animations.splice(toRemove[i], 1);
+    }
+  }
+
+  function gameLoop(timestamp) {
+    const delta = timestamp - lastTimestamp;
+    lastTimestamp = timestamp;
+    updateAnimations(delta);
+    render();
+    requestAnimationFrame(gameLoop);
+  }
+
+  // ===== Обробка кліків гравця =====
+  canvas.addEventListener("click", (e) => {
+    if (gameState !== "playerTurn") return;
+    const active = getActiveUnit();
+    if (!active || !active.isPlayer || active.hp <= 0) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    const gx = Math.floor((mx - OFFSET_X) / CELL_SIZE);
+    const gy = Math.floor((my - OFFSET_Y) / CELL_SIZE);
+
+    if (gx < 0 || gx >= GRID_COLS || gy < 0 || gy >= GRID_ROWS) return;
+
+    const target = getUnitAt(gx, gy);
+
+    if (target && !target.isPlayer) {
+      if (isInAttackRange(active, target)) {
+        performAttack(active, target);
+        setTimeout(() => endTurn(), 260);
+      } else {
+        setMessage("Ціль занадто далеко для атаки.");
+      }
+      return;
+    }
+
+    if (!target) {
+      if (isInMoveRange(active, gx, gy)) {
+        moveUnit(active, gx, gy);
+        setTimeout(() => endTurn(), 260);
+      } else {
+        setMessage("Точка занадто далеко для руху.");
+      }
+    }
+  });
+
+  restartBtn.addEventListener("click", () => {
+    initBattle();
+  });
+
+  const resetUnitsBtn = document.getElementById('btn-reset-units');
+  if (resetUnitsBtn) {
+    resetUnitsBtn.addEventListener('click', () => {
+      // recreate units from the external INITIAL_UNITS and restart the battle
+      initBattle();
+    });
+  }
+
+  // Expose a start callback for the units loader to call once units are ready.
+  // The loader will call window.__bs_start() after it fetches /units.json.
+  window.__bs_start = function() {
+    initBattle();
+    requestAnimationFrame(gameLoop);
+  };
+  // If units were already loaded before this script ran, start immediately.
+  if (window.INITIAL_UNITS) {
+    window.__bs_start();
+  }
+})();
+</script>
+</body>
+</html>
