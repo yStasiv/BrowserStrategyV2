@@ -108,6 +108,11 @@
       });
     })();
 
+    function getUnitSize(u) {
+      const s = u.size || 1;
+      return { w: u.w || u.width || s, h: u.h || u.height || s };
+    }
+
     function draw() {
       ctx.clearRect(0,0,canvas.width,canvas.height);
       // grid
@@ -121,15 +126,18 @@
       }
       // units
       for (let u of units) {
-        const x = OFFSET_X + (u.visualX ?? u.x) * CELL_SIZE;
-        const y = OFFSET_Y + (u.visualY ?? u.y) * CELL_SIZE;
+        const gx = (typeof u.visualX === 'number') ? u.visualX : u.x;
+        const gy = (typeof u.visualY === 'number') ? u.visualY : u.y;
+        const { w, h } = getUnitSize(u);
+        const x = OFFSET_X + gx * CELL_SIZE;
+        const y = OFFSET_Y + gy * CELL_SIZE;
         ctx.fillStyle = u.isPlayer ? '#3b82f6' : '#ef4444';
-        ctx.fillRect(x+8,y+8,CELL_SIZE-16,CELL_SIZE-16);
+        ctx.fillRect(x+8, y+8, w*CELL_SIZE - 16, h*CELL_SIZE - 16);
         ctx.fillStyle = '#e5e7eb';
         ctx.font = '10px system-ui';
         ctx.textAlign='center';
-        ctx.fillText(u.name, x+CELL_SIZE/2, y+18);
-        ctx.fillText(`${u.hp || u.maxHp}/${u.maxHp}`, x+CELL_SIZE/2, y+CELL_SIZE/2+4);
+        ctx.fillText(u.name, x + (w*CELL_SIZE)/2, y + 18);
+        ctx.fillText(`${u.hp || u.maxHp}/${u.maxHp}`, x + (w*CELL_SIZE)/2, y + (h*CELL_SIZE)/2 + 4);
       }
     }
 

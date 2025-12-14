@@ -1,19 +1,5 @@
 [
-  {
-    "id": "p1",
-    "name": "Рицар",
-    "isPlayer": true,
-    "x": 1,
-    "y": 2,
-    "hp": 30,
-    "maxHp": 30,
-    "attack": 800,
-    "moveRange": 2,
-    "initiative": 12,
-    "range": 100
-  },
-
-  {
+    {
     "id": "e3",
     "name": "Брут",
     "isPlayer": false,
@@ -33,12 +19,12 @@
     "isPlayer": true,
     "x": 0,
     "y": 4,
-    "hp": 60,
+    "hp": 10,
     "maxHp": 60,
     "attack": 14,
     "moveRange": 1,
     "initiative": 6,
-    "range": 1,
+    "range": 5,
     "size": 2
   }
 ]

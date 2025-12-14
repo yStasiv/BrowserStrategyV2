@@ -163,9 +163,9 @@
     const { w, h } = getUnitSize(unit);
     // bounds
     if (x < 0 || y < 0 || x + w > GRID_COLS || y + h > GRID_ROWS) return false;
-    // player units must be inside first two columns
+    // player units must be inside first two columns ONLY during placement phase
     const maxPlayerCols = 2;
-    if (unit.isPlayer) {
+    if (unit.isPlayer && isPlacement) {
       if (x + w > maxPlayerCols) return false;
     }
     // check overlap with other units (ignore self)
