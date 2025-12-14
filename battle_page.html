@@ -85,6 +85,11 @@
       border-radius: 12px;
       cursor: pointer;
       background: radial-gradient(circle at top, #1e293b 0, #020617 55%);
+      /* lock CSS size to prevent layout jitter when top-bar changes */
+      display: block;
+      width: 800px;
+      height: 768px;
+      box-sizing: border-box;
     }
     #hint {
       font-size: 12px;
@@ -131,8 +136,9 @@
     </div>
     <button id="btn-restart">Перезапустити бій</button>
     <button id="btn-reset-units">Скинути юнітів</button>
+    <button id="btn-start-battle">Почати бій</button>
   </div>
-  <canvas id="battlefield" width="800" height="480"></canvas>
+  <canvas id="battlefield" width="800" height="768"></canvas>
   <div id="hint">
     Гравець: сині юніти. Ворог: червоні. Клік по порожній клітинці — рух, клік по ворогу (в радіусі) — атака.
   </div>
@@ -159,11 +165,12 @@
   const ctx = canvas.getContext("2d");
   const msgEl = document.getElementById("message");
   const restartBtn = document.getElementById("btn-restart");
+  const startBtn = document.getElementById("btn-start-battle");
   const turnWheelEl = document.getElementById("turn-wheel");
   const turnWheelLabel = document.getElementById("turn-wheel-label");
 
-  const GRID_COLS = 10;
-  const GRID_ROWS = 6;
+  const GRID_COLS = 12;
+  const GRID_ROWS = 10;
   const CELL_SIZE = 64;
   const OFFSET_X = (canvas.width - GRID_COLS * CELL_SIZE) / 2;
   const OFFSET_Y = (canvas.height - GRID_ROWS * CELL_SIZE) / 2;
@@ -175,6 +182,9 @@
   let roundNumber = 1;
   // Recorded moves for this match (sent to server as part of details)
   let recordedMoves = [];
+  // placement mode
+  let isPlacement = false;
+  let selectedUnit = null;
 
   // для анімацій руху
   let animations = [];
@@ -207,6 +217,52 @@
     }
     updateTurnWheel();
   }
+  
+    function enterPlacementMode() {
+      // load initial units but enter placement state so user can position their army
+      units = createInitialUnits();
+      // ensure sensible default positions for placement: players left, enemies right
+      let pIndex = 0, eIndex = 0;
+      units.forEach(u => {
+        if (u.isPlayer) {
+          if (typeof u.x !== 'number' || typeof u.y !== 'number') {
+            u.x = 0; u.y = Math.min(GRID_ROWS - 1, pIndex++);
+          }
+        } else {
+          if (typeof u.x !== 'number' || typeof u.y !== 'number') {
+            u.x = GRID_COLS - 1; u.y = Math.min(GRID_ROWS - 1, eIndex++);
+          }
+        }
+        u.visualX = u.x; u.visualY = u.y;
+      });
+      isPlacement = true;
+      // auto-select the first available player unit so user doesn't need to click to begin
+      selectedUnit = units.find(u => u.isPlayer && u.hp > 0) || null;
+      // start fresh recordedMoves for this placement session
+      recordedMoves = [];
+      gameState = 'placement';
+      if (selectedUnit) {
+        setMessage(`Юніт ${selectedUnit.name} вибрано. Клікніть по клітинці щоб поставити його або виберіть інший.`);
+      } else {
+        setMessage('Розставте ваше військо: клік по клітинці — поставити юніта. Коли готові — натисніть "Почати бій".');
+      }
+      updateTurnWheel();
+    }
+  
+    function startBattleFromPlacement() {
+      // lock positions and start the battle
+      isPlacement = false;
+      selectedUnit = null;
+      turnOrder = [...units].sort((a, b) => b.initiative - a.initiative);
+      currentIndex = 0;
+  roundNumber = 1;
+  // preserve any placement actions recorded earlier, then record the start snapshot
+  recordedMoves.push({ type: 'start', time: Date.now(), units: JSON.parse(JSON.stringify(units)) });
+      gameState = turnOrder[0] && turnOrder[0].isPlayer ? 'playerTurn' : 'aiTurn';
+      setMessage(`Раунд ${roundNumber}. ${gameState === 'playerTurn' ? 'Твій хід.' : 'Хід ворога.'}`);
+      if (gameState === 'aiTurn') aiTurnWithDelay();
+      updateTurnWheel();
+    }
 
   function getUnitAt(x, y) {
     return units.find(u => u.x === x && u.y === y && u.hp > 0);
@@ -524,6 +580,14 @@
       ctx.fillText(u.name, x + CELL_SIZE / 2, y + 18);
       ctx.fillText(`${u.hp}/${u.maxHp}`, x + CELL_SIZE / 2, y + CELL_SIZE / 2 + 4);
       ctx.restore();
+      // highlight selected unit in placement mode
+      if (isPlacement && u.isPlayer && selectedUnit && selectedUnit.id === u.id) {
+        ctx.save();
+        ctx.strokeStyle = '#facc15';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(x + 6, y + 6, CELL_SIZE - 12, CELL_SIZE - 12);
+        ctx.restore();
+      }
     }
   }
 
@@ -702,10 +766,6 @@
 
   // ===== Обробка кліків гравця =====
   canvas.addEventListener("click", (e) => {
-    if (gameState !== "playerTurn") return;
-    const active = getActiveUnit();
-    if (!active || !active.isPlayer || active.hp <= 0) return;
-
     const rect = canvas.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
@@ -714,6 +774,63 @@
     const gy = Math.floor((my - OFFSET_Y) / CELL_SIZE);
 
     if (gx < 0 || gx >= GRID_COLS || gy < 0 || gy >= GRID_ROWS) return;
+
+    // Placement mode: select player unit or place selected unit on empty cell
+    if (isPlacement || gameState === 'placement') {
+      const clicked = getUnitAt(gx, gy);
+      // clicking a player unit selects it
+      if (clicked && clicked.isPlayer) {
+        selectedUnit = clicked;
+        setMessage('Юніт вибрано. Клікніть по клітинці щоб поставити його.');
+        return;
+      }
+      // clicking an empty cell should place the selected unit; if none selected,
+      // auto-select the nearest available player unit and place it there.
+      if (!clicked) {
+        // if nothing selected, auto-choose nearest player unit
+        if (!selectedUnit) {
+          const candidates = units.filter(u => u.isPlayer && u.hp > 0);
+          if (candidates.length > 0) {
+            let best = null; let bestDist = Infinity;
+            for (let u of candidates) {
+              const d = Math.abs(u.x - gx) + Math.abs(u.y - gy);
+              if (d < bestDist) { best = u; bestDist = d; }
+            }
+            selectedUnit = best;
+          }
+        }
+
+        if (!selectedUnit) {
+          setMessage('Немає доступних юнітів для розміщення.');
+          return;
+        }
+
+        // ensure no other unit occupies the destination
+        const other = getUnitAt(gx, gy);
+        if (other) {
+          setMessage('Тут вже стоїть юніт. Виберіть інше місце.');
+          return;
+        }
+
+        selectedUnit.x = gx;
+        selectedUnit.y = gy;
+        selectedUnit.visualX = gx;
+        selectedUnit.visualY = gy;
+        try {
+          recordedMoves.push({ type: 'place', time: Date.now(), unitId: selectedUnit.id, x: gx, y: gy });
+        } catch (err) { /* ignore */ }
+        selectedUnit = null;
+        setMessage('Юніт поставлено. Виберіть наступний або натисніть "Почати бій".');
+        updateTurnWheel();
+        return;
+      }
+      return;
+    }
+
+    // normal player turn handling
+    if (gameState !== "playerTurn") return;
+    const active = getActiveUnit();
+    if (!active || !active.isPlayer || active.hp <= 0) return;
 
     const target = getUnitAt(gx, gy);
 
@@ -738,21 +855,34 @@
   });
 
   restartBtn.addEventListener("click", () => {
-    initBattle();
+    enterPlacementMode();
   });
 
   const resetUnitsBtn = document.getElementById('btn-reset-units');
   if (resetUnitsBtn) {
     resetUnitsBtn.addEventListener('click', () => {
       // recreate units from the external INITIAL_UNITS and restart the battle
-      initBattle();
+      enterPlacementMode();
+    });
+  }
+
+  // start / placement button toggling
+  if (startBtn) {
+    startBtn.addEventListener('click', () => {
+      if (!isPlacement && gameState !== 'placement') {
+        enterPlacementMode();
+        return;
+      }
+      // if we're already in placement, finalize and start
+      startBattleFromPlacement();
     });
   }
 
   // Expose a start callback for the units loader to call once units are ready.
   // The loader will call window.__bs_start() after it fetches /units.json.
   window.__bs_start = function() {
-    initBattle();
+    // start in placement mode so user arranges army before the fight
+    enterPlacementMode();
     requestAnimationFrame(gameLoop);
   };
   // If units were already loaded before this script ran, start immediately.
