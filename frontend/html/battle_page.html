@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <title>Бій у стилі Heroes</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #111827;
+      color: #e5e7eb;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    #wrapper {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: #020617;
+      padding: 12px;
+      border-radius: 16px;
+      box-shadow: 0 15px 40px rgba(0,0,0,0.6);
+      max-width: 980px;
+    }
+    #top-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 14px;
+      gap: 12px;
+    }
+    #message {
+      min-width: 260px;
+    }
+    #btn-restart {
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: none;
+      cursor: pointer;
+      font-size: 13px;
+      background: #22c55e;
+      color: #022c22;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    #btn-restart:hover {
+      filter: brightness(1.1);
+    }
+    #turn-wheel {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      font-size: 12px;
+      margin-top: 2px;
+      margin-bottom: 4px;
+    }
+    #turn-wheel-label {
+      margin-right: 6px;
+      color: #9ca3af;
+      white-space: nowrap;
+    }
+    .turn-item {
+      width: 26px;
+      height: 26px;
+      border-radius: 999px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 600;
+      border: 1px solid rgba(15,23,42,0.9);
+      box-shadow: 0 0 0 1px rgba(15,23,42,0.7);
+      opacity: 0.75;
+    }
+    .turn-item.player { background: #1d4ed8; color: #e5e7eb; }
+    .turn-item.enemy { background: #b91c1c; color: #fee2e2; }
+    .turn-item.active {
+      opacity: 1;
+      box-shadow: 0 0 0 2px #fbbf24;
+      transform: scale(1.05);
+    }
+    canvas {
+      border-radius: 12px;
+      cursor: pointer;
+      background: radial-gradient(circle at top, #1e293b 0, #020617 55%);
+      /* lock CSS size to prevent layout jitter when top-bar changes */
+      display: block;
+      width: 800px;
+      height: 768px;
+      box-sizing: border-box;
+    }
+    #hint {
+      font-size: 12px;
+      color: #9ca3af;
+      text-align: center;
+    }
+    /* result modal */
+    #result-modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(2,6,23,0.7);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+    }
+    #result-modal {
+      background: #071033;
+      color: #e6eef8;
+      padding: 18px;
+      border-radius: 12px;
+      max-width: 420px;
+      width: 92%;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+      text-align: center;
+    }
+    #result-modal h2 { margin: 0 0 8px 0; font-size: 20px; }
+    #result-modal p { margin: 0 0 12px 0; color: #9ca3af; }
+    .modal-actions { display:flex; gap:8px; justify-content:center; margin-top:12px; }
+    .modal-actions a, .modal-actions button {
+      background: #2563eb; color: white; padding:8px 12px; border-radius:8px; border:none; text-decoration:none; cursor:pointer;
+    }
+  </style>
+</head>
+<body>
+<div id="wrapper">
+  <div id="top-bar">
+    <div>
+      <div id="message">Клікни по клітинці, щоб походити.</div>
+      <div id="turn-wheel">
+        <span id="turn-wheel-label">Черга ходів:</span>
+        <!-- елементи черги малюються скриптом -->
+      </div>
+    </div>
+    <button id="btn-restart">Перезапустити бій</button>
+    <button id="btn-reset-units">Скинути юнітів</button>
+    <button id="btn-start-battle">Почати бій</button>
+  </div>
+  <canvas id="battlefield" width="800" height="768"></canvas>
+  <div id="hint">
+    Гравець: сині юніти. Ворог: червоні. Клік по порожній клітинці — рух, клік по ворогу (в радіусі) — атака.
+  </div>
+  <!-- Result modal overlay -->
+  <div id="result-modal-overlay" aria-hidden="true">
+    <div id="result-modal" role="dialog" aria-modal="true">
+      <h2 id="result-title">Результат бою</h2>
+      <p id="result-message">Хто переміг...</p>
+      <div class="modal-actions">
+        <a id="btn-to-stats" href="/">Перейти до статистики</a>
+        <a id="btn-replay" href="#" style="display:none;">Переглянути бій</a>
+        <button id="btn-restart-modal">Перезапустити бій</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- load units from JSON via the loader (sets window.INITIAL_UNITS) -->
+<script src="/units-loader.js"></script>
+<!-- game logic -->
+<script src="/frontend/js/battle_logic.js"></script>
+</body>
+</html>

@@ -1,19 +1,18 @@
 [
-  
   {
-    "id": "p3",
-    "name": "Лікар",
+    "id": "p1",
+    "name": "Рицар",
     "isPlayer": true,
-    "x": 0,
+    "x": 1,
     "y": 2,
-    "hp": 20,
-    "maxHp": 20,
-    "attack": 40,
-    "moveRange": 10,
-    "initiative": 100,
-    "range": 1
+    "hp": 30,
+    "maxHp": 30,
+    "attack": 800,
+    "moveRange": 2,
+    "initiative": 12,
+    "range": 100
   },
-  
+
   {
     "id": "e3",
     "name": "Брут",

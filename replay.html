@@ -12,13 +12,25 @@
 </head>
 <body>
   <h2>Перегляд бою</h2>
-  <canvas id="replay-canvas" width="800" height="480"></canvas>
+  <canvas id="replay-canvas" width="800" height="768"></canvas>
   <div id="debug" style="display:none;color:#e6eef8;margin-top:12px;max-width:980px;white-space:pre-wrap;font-family:monospace"></div>
   <div id="controls">
     <button id="btn-play">Play</button>
     <button id="btn-pause">Pause</button>
     <button id="btn-step">Next</button>
     <a id="back" href="/">Назад</a>
+  </div>
+
+  <!-- Replay end modal -->
+  <div id="replay-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(2,6,23,0.7);align-items:center;justify-content:center;z-index:9999">
+    <div id="replay-modal" role="dialog" aria-modal="true" style="background:#071033;color:#e6eef8;padding:18px;border-radius:12px;max-width:420px;width:92%;box-shadow:0 10px 30px rgba(0,0,0,0.6);text-align:center;margin:auto">
+      <h2 id="replay-modal-title" style="margin:0 0 8px 0;font-size:20px">Перегляд завершено</h2>
+      <p id="replay-modal-message" style="margin:0 0 12px 0;color:#9ca3af">Бажаєш переглянути ще раз або повернутись до статистики?</p>
+      <div style="display:flex;gap:8px;justify-content:center;margin-top:12px">
+        <button id="btn-replay-again" style="background:#2563eb;color:white;padding:8px 12px;border-radius:8px;border:none;cursor:pointer">Переглянути ще раз</button>
+        <a id="btn-replay-to-stats" class="" href="/" style="background:#2563eb;color:white;padding:8px 12px;border-radius:8px;text-decoration:none;display:inline-flex;align-items:center;justify-content:center">Повернутись до статистики</a>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -32,7 +44,7 @@
     }
     const canvas = document.getElementById('replay-canvas');
     const ctx = canvas.getContext('2d');
-    const GRID_COLS = 10, GRID_ROWS = 6, CELL_SIZE = 64;
+    const GRID_COLS = 12, GRID_ROWS = 10, CELL_SIZE = 64;
     const OFFSET_X = (canvas.width - GRID_COLS * CELL_SIZE) / 2;
     const OFFSET_Y = (canvas.height - GRID_ROWS * CELL_SIZE) / 2;
 
@@ -238,6 +250,11 @@
       const m = moves[idx++];
       applyMove(m);
       highlightMove();
+      // if we've reached the end, stop and show modal
+      if (idx >= moves.length) {
+        stop();
+        try { showReplayModal(); } catch (e) { console.error('Failed showing replay modal', e); }
+      }
     }
 
     function start() {
@@ -251,6 +268,37 @@
     document.getElementById('btn-play').addEventListener('click', start);
     document.getElementById('btn-pause').addEventListener('click', stop);
     document.getElementById('btn-step').addEventListener('click', next);
+
+    // show/hide replay modal
+    const replayOverlay = document.getElementById('replay-modal-overlay');
+    const btnReplayAgain = document.getElementById('btn-replay-again');
+    const btnReplayToStats = document.getElementById('btn-replay-to-stats');
+
+    function showReplayModal() {
+      if (replayOverlay) replayOverlay.style.display = 'flex';
+    }
+    function hideReplayModal() {
+      if (replayOverlay) replayOverlay.style.display = 'none';
+    }
+
+    btnReplayAgain.addEventListener('click', () => {
+      hideReplayModal();
+      resetToStart();
+      idx = 0;
+      highlightMove();
+      start();
+    });
+    // btnReplayToStats is an anchor to '/', no extra handler needed
+
+    // If jumpTo lands at the end, show modal
+    const originalJumpTo = jumpTo;
+    function jumpToWithModal(i) {
+      originalJumpTo(i);
+      if (idx >= moves.length) showReplayModal();
+    }
+    // replace jumpTo used by UI with wrapper
+    window.__jumpTo = jumpTo; // keep reference for debugging
+    jumpTo = jumpToWithModal;
 
   })();
   </script>
